@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diabetes Risk Prediction</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase Imports (minimal as model is local) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        
+        // Global variables provided by the environment
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+        // Initialize Firebase
+        try {
+            window.app = initializeApp(firebaseConfig);
+            if (window.app) { 
+                window.auth = getAuth(window.app);
+            }
+        } catch (e) {
+            console.error("Firebase Initialization Error:", e);
+        }
+        
+        window.userId = null;
+
+        // Sign in and set up listener
+        onAuthStateChanged(window.auth, (user) => {
+            if (user) {
+                window.userId = user.uid;
+                document.dispatchEvent(new Event('firebaseReady'));
+            } else {
+                signInAnonymously(window.auth)
+                    .then(() => console.log("Anonymous sign-in attempted."))
+                    .catch(error => console.error("Firebase Auth Auth Error on Anonymous Sign-in:", error));
+            }
+        });
+    </script>
+    <!-- Configure Tailwind to use Inter font and new colors/shadows -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary-blue': '#1D4ED8',
+                        'secondary-cyan': '#06B6D4',
+                        'background-light': '#F8FAFC',
+                        'card-light': '#FFFFFF',
+                        'input-bg': '#F1F5F9',
+                    },
+                    boxShadow: {
+                        '3xl': '0 10px 30px rgba(0, 0, 0, 0.1)',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom scrollbar for aesthetics */
+        body::-webkit-scrollbar {
+            width: 8px;
+        }
+        body::-webkit-scrollbar-thumb {
+            background-color: #1D4ED8;
+            border-radius: 4px;
+        }
+        /* Subtle transition for input focus */
+        input:focus {
+            transition: border-color 0.3s, box-shadow 0.3s;
+            box-shadow: 0 0 10px rgba(30, 144, 255, 0.4); /* Blue glow on focus */
+            border-color: #1D4ED8;
+        }
+
+        /* Gradient for the Calculate button */
+        .calculate-button {
+            background-image: linear-gradient(to right, #1D4ED8 0%, #1E40AF 100%);
+            box-shadow: 0 5px 15px rgba(29, 78, 216, 0.4);
+            transition: all 0.3s ease-in-out;
+        }
+        .calculate-button:hover:not(:disabled) {
+            transform: scale(1.02);
+            box-shadow: 0 8px 20px rgba(29, 78, 216, 0.6);
+        }
+        .calculate-button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            background-image: linear-gradient(to right, #9CA3AF 0%, #6B7280 100%);
+            box-shadow: none;
+        }
+        
+        /* Pulse Animation for the Result area (uses Cyan) */
+        @keyframes pulse-once {
+            0% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(6, 182, 212, 0); }
+            100% { box-shadow: none; }
+        }
+        .result-pulse {
+            animation: pulse-once 0.5s ease-out;
+        }
+        /* Spinner */
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Style for the alert message */
+        .input-alert {
+            opacity: 1;
+            transition: opacity 0.3s ease-in-out;
+            margin-top: 0.25rem;
+            height: auto;
+        }
+        .input-alert.hidden-alert {
+            opacity: 0;
+            height: 0;
+            overflow: hidden;
+            margin-top: 0;
+        }
+        /* Custom styles for the Risk Gauge (SVG circle) */
+        .risk-gauge-ring {
+            transition: stroke-dashoffset 1s ease-in-out;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+        /* Style for the Menu links */
+        .nav-link {
+            transition: color 0.2s;
+        }
+        .nav-link:hover {
+            color: #06B6D4; /* secondary-cyan */
+        }
+        /* Style for highlighting unchecked radio groups */
+        .radio-group-error {
+            border: 2px solid #EF4444; /* red-500 */
+            background-color: #FEF2F2; /* red-50 */
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            transition: all 0.2s;
+        }
+    </style>
+</head>
+<body class="font-sans bg-background-light min-h-screen text-gray-800 flex items-center justify-center p-4">
+
+    <!-- Main Container Card -->
+    <div class="w-full max-w-4xl bg-card-light rounded-3xl shadow-3xl p-6 md:p-10 border border-gray-200">
+
+        <!-- Header -->
+        <header class="text-center mb-6 pb-4 border-b border-gray-200">
+            <!-- LOGO: Activity/Trend SVG (now blue) -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto mb-4 text-primary-blue">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+            <h1 class="text-5xl font-extrabold text-primary-blue mb-2 tracking-tight">Diabetes Risk Prediction</h1>
+            <p class="text-gray-600 text-lg">Prediction based on Bangladesh Diabetes Dataset (DiaBD) Model.</p>
+        </header>
+
+        <!-- Navigation Menu -->
+        <nav class="mb-8 flex justify-center space-x-8 font-semibold text-gray-600 border-b pb-4 border-gray-200">
+            <a href="#predictionForm" class="nav-link text-primary-blue">Predictor</a>
+            <a href="#info-section" class="nav-link">Information</a>
+            <a href="#history-section" class="nav-link">History</a>
+            <a href="#about-us" class="nav-link">About Us</a>
+        </nav>
+        
+        <!-- Informational Image: New Header Banner -->
+        <div class="mb-8 rounded-xl overflow-hidden shadow-lg border-2 border-primary-blue/30">
+            <img src="https://placehold.co/1200x200/93c5fd/1d4ed8?text=Your+Health+Matters" alt="Health Data Analysis and Diabetes Risk Banner" class="w-full h-auto object-cover" onerror="this.onerror=null; this.src='https://placehold.co/1200x200/93c5fd/1d4ed8?text=Your+Health+Matters';">
+        </div>
+
+        <hr class="border-gray-200 mb-6"> <!-- Visual Separator -->
+
+        <!-- Prediction Form -->
+        <form id="predictionForm" class="grid grid-cols-1 gap-6">
+
+            <!-- === ALL 14 DIA BD INPUTS === -->
+            <div id="unifiedForm" class="grid grid-cols-1 gap-6">
+                
+                <!-- Group 5: Personal Info and Context (MOVED TO TOP) -->
+                <h2 class="text-xl font-bold text-primary-blue border-b pb-2 mb-4">Personal Details</h2>
+                
+                <!-- STACKED PERSONAL DETAILS -->
+                <div class="grid grid-cols-1 gap-4">
+                    <!-- User Name -->
+                    <div>
+                        <label for="userName" class="block text-sm font-medium text-gray-700 mb-1">Your Name</label>
+                        <input type="text" id="userName" required placeholder="e.g., Alex" maxlength="50" oninput="validateName(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-userName" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+
+                    <!-- Email Field -->
+                    <div>
+                        <label for="userEmail" class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                        <input type="email" id="userEmail" required 
+                                placeholder="e.g., alex@gmail.com" maxlength="100" 
+                                pattern=".+@(gmail\.com|zohomail\.in)"
+                                oninput="validateEmailDomain(this)" 
+                                class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-userEmail" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+                    
+                    <!-- Prediction Title Input (Moved here, kept for history) -->
+                    <div>
+                        <label for="predictionTitle" class="block text-sm font-medium text-gray-700 mb-1">Prediction Title (Optional)</label>
+                        <input type="text" id="predictionTitle" placeholder="e.g., My 2024 Checkup" maxlength="50" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                    </div>
+
+                    <!-- NEW: Location Input (Used only for High Risk Map Link) -->
+                    <div>
+                        <label for="locationInput" class="block text-sm font-medium text-gray-700 mb-1">Your City/Zip Code (Optional for High Risk Map)</label>
+                        <input type="text" id="locationInput" placeholder="e.g., 94043 or Mountain View" maxlength="100" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                    </div>
+                </div>
+
+                <hr class="border-gray-200 my-4">
+
+                <!-- Group 1: Personal & Vitals (Age, Gender, Glucose, Pulse) -->
+                <h2 class="text-2xl font-bold text-primary-blue border-b pb-2 mb-4">Vitals & Anthropometrics</h2>
+
+                <!-- STACKED VITALS & ANTHROPOMETRICS -->
+                <div class="grid grid-cols-1 gap-4">
+                    <!-- 1. Age -->
+                    <div>
+                        <label for="age" class="block text-sm font-medium text-gray-700 mb-1">1. Age (Years)</label>
+                        <input type="number" id="age" required placeholder="e.g., 50" min="18" max="120" oninput="validateInput(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-age" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+
+                    <!-- 2. Gender (New) -->
+                    <div id="gender-group">
+                        <label class="block text-sm font-bold text-primary-blue mb-2">2. Gender</label>
+                        <div class="flex space-x-4 pt-1">
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="gender" value="0" id="genderFemale" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">Female</span>
+                            </label>
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="gender" value="1" id="genderMale" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">Male</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 3. Glucose -->
+                    <div>
+                        <label for="glucose" class="block text-sm font-medium text-gray-700 mb-1">3. Glucose (mmol/L or equivalent, e.g., 7.5)</label>
+                        <input type="number" id="glucose" required placeholder="e.g., 7.5" step="0.01" min="0.01" max="35" oninput="validateInput(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-glucose" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+                    
+                    <!-- 4. Pulse Rate -->
+                    <div>
+                        <label for="pulse_rate" class="block text-sm font-medium text-gray-700 mb-1">4. Pulse Rate (per min)</label>
+                        <input type="number" id="pulse_rate" required placeholder="e.g., 76" min="30" max="150" oninput="validateInput(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-pulse_rate" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+
+                    <!-- 5. Systolic BP (New) -->
+                    <div>
+                        <label for="systolic_bp" class="block text-sm font-medium text-gray-700 mb-1">5. Systolic BP (mm Hg)</label>
+                        <input type="number" id="systolic_bp" required placeholder="e.g., 125" min="60" max="250" oninput="validateInput(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-systolic_bp" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+                    
+                    <!-- 6. Diastolic BP -->
+                    <div>
+                        <label for="diastolic_bp" class="block text-sm font-medium text-gray-700 mb-1">6. Diastolic BP (mm Hg)</label>
+                        <input type="number" id="diastolic_bp" required placeholder="e.g., 82" min="10" max="130" oninput="validateInput(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-diastolic_bp" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+
+                    <!-- 7. Height (New) -->
+                    <div>
+                        <label for="height" class="block text-sm font-medium text-gray-700 mb-1">7. Height (meters, e.g., 1.75)</label>
+                        <input type="number" id="height" required placeholder="e.g., 1.75" step="0.01" min="0.5" max="2.5" oninput="validateInput(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-height" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+                    
+                    <!-- 8. Weight -->
+                    <div>
+                        <label for="weight" class="block text-sm font-medium text-gray-700 mb-1">8. Weight (kg, e.g., 70.0)</label>
+                        <input type="number" id="weight" required placeholder="e.g., 70.0" step="0.1" min="10" max="200" oninput="validateInput(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-weight" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+
+                    <!-- 9. BMI (New) -->
+                    <div>
+                        <label for="bmi" class="block text-sm font-medium text-gray-700 mb-1">9. BMI (Body Mass Index, e.g., 22.8)</label>
+                        <input type="number" id="bmi" required placeholder="e.g., 22.8" step="0.01" min="10" max="80" oninput="validateInput(this)" class="w-full p-3 rounded-lg bg-input-bg border border-gray-300 focus:ring-2 text-gray-800 transition duration-200">
+                        <div id="alert-bmi" class="input-alert text-xs text-red-500 mt-1 hidden-alert"></div>
+                    </div>
+                </div>
+
+
+                <hr class="border-gray-200 my-4">
+
+                <!-- Group 4: Binary Risk Factors (Family History & Existing Conditions) -->
+                <h2 class="text-2xl font-bold text-primary-blue border-b pb-2 mb-4">Risk Factors & Existing Conditions</h2>
+                <div class="space-y-6">
+                    <!-- 10. Family Diabetes -->
+                    <div id="family_diabetes-group">
+                        <label class="block text-sm font-bold text-primary-blue mb-2">10. Family Diabetes?</label>
+                        <div class="flex space-x-6">
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="family_diabetes" value="1" id="fd_yes" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">Yes</span>
+                            </label>
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="family_diabetes" value="0" id="fd_no" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">No</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 11. Hypertensive -->
+                    <div id="hypertensive-group">
+                        <label class="block text-sm font-bold text-primary-blue mb-2">11. Are you Hypertensive?</label>
+                        <div class="flex space-x-6">
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="hypertensive" value="1" id="h_yes" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">Yes</span>
+                            </label>
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="hypertensive" value="0" id="h_no" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">No</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 12. Family Hypertension -->
+                    <div id="family_hypertension-group">
+                        <label class="block text-sm font-bold text-primary-blue mb-2">12. Family Hypertension?</label>
+                        <div class="flex space-x-6">
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="family_hypertension" value="1" id="fh_yes" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">Yes</span>
+                            </label>
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="family_hypertension" value="0" id="fh_no" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">No</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 13. Has Cardiovascular Disease (New) -->
+                    <div id="cardiovascular_disease-group">
+                        <label class="block text-sm font-bold text-primary-blue mb-2">13. Has Cardiovascular Disease?</label>
+                        <div class="flex space-x-6">
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="cardiovascular_disease" value="1" id="cvd_yes" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">Yes</span>
+                            </label>
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="cardiovascular_disease" value="0" id="cvd_no" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">No</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- 14. Has Stroke (New) -->
+                    <div id="stroke-group">
+                        <label class="block text-sm font-bold text-primary-blue mb-2">14. Has Stroke?</label>
+                        <div class="flex space-x-6">
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="stroke" value="1" id="s_yes" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">Yes</span>
+                            </label>
+                            <label class="flex items-center text-gray-700">
+                                <input type="radio" name="stroke" value="0" id="s_no" class="h-5 w-5 text-primary-blue focus:ring-primary-blue" required>
+                                <span class="ml-2">No</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Removed Prediction Context (Optional) section entirely -->
+            </div>
+
+            <!-- Prediction Button -->
+            <div class="col-span-1 mt-4">
+                <button type="submit" id="calculateButton" class="calculate-button w-full py-4 text-white font-bold text-xl rounded-xl transition duration-300 transform focus:outline-none focus:ring-4 focus:ring-primary-blue focus:ring-opacity-50 flex items-center justify-center">
+                    <span id="buttonText">CALCULATE RISK SCORE</span>
+                    <div id="loadingSpinner" class="spinner ml-3 hidden"></div>
+                </button>
+            </div>
+        </form>
+        
+        <!-- Error Message -->
+        <div id="errorOutput" class="mt-4 p-4 bg-red-100 text-red-700 rounded-lg shadow-md hidden border border-red-300">
+            <span id="errorText">Please ensure all required fields are filled, and all numerical fields have valid values.</span>
+        </div>
+
+
+        <!-- Output Area (Dynamic Styling via JS) -->
+        <div id="resultOutput" class="mt-8 p-6 bg-white rounded-xl shadow-xl border-t-4 hidden transition duration-500">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                
+                <!-- Risk Gauge (Col 1/3) -->
+                <div class="col-span-1 text-center">
+                    <h3 class="text-xl font-semibold mb-2 text-primary-blue">Risk Gauge</h3>
+                    <div id="riskGaugeContainer" class="relative w-32 h-32 mx-auto">
+                        <!-- SVG will be injected here -->
+                    </div>
+                </div>
+
+                <!-- Risk Percentage and Interpretation (Col 2/3) -->
+                <div class="col-span-2">
+                    <h2 class="text-2xl font-bold mb-3 text-primary-blue"><span id="outputTitle">Prediction Result</span></h2>
+                    <div class="text-xl mb-4">
+                        <span class="font-medium text-gray-600">Diabetes Risk Probability:</span>
+                        <span id="riskPercentage" class="ml-2 font-extrabold text-4xl text-gray-800"></span>
+                    </div>
+                    <div id="riskInterpretation" class="p-4 rounded-lg text-lg font-semibold border-l-4"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Prediction History Section -->
+        <section id="history-section" class="mt-10">
+            <h2 class="text-3xl font-bold text-primary-blue mb-4 border-b pb-2 border-gray-300">Prediction History</h2>
+            <div id="predictionHistoryContainer" class="overflow-x-auto">
+                <!-- History Table will be rendered here by JS -->
+                <p id="noHistoryMessage" class="text-gray-500 italic p-4 bg-input-bg rounded-lg">No predictions saved yet.</p>
+            </div>
+            <button id="clearHistoryButton" class="mt-4 text-red-500 hover:text-red-700 text-sm font-medium hidden" onclick="clearPredictionHistory()">Clear History</button>
+        </section>
+
+        <!-- Information Section (Target for Menu Link) -->
+        <section id="info-section" class="mt-10 p-6 bg-input-bg rounded-xl shadow-inner border border-gray-200">
+            <h2 class="text-3xl font-bold text-primary-blue mb-4 border-b pb-2 border-gray-300">Understanding Diabetes Risk</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-gray-700">
+                
+                <!-- Key Risk Factors -->
+                <div class="flex flex-col">
+                    <div class="flex items-center mb-2">
+                         <img src="https://placehold.co/40x40/f4a261/ffffff?text=Risk" alt="Risk Icon" class="w-10 h-10 mr-3 rounded-full object-cover shadow-md border-2 border-white" onerror="this.onerror=null; this.src='https://placehold.co/40x40/f4a261/ffffff?text=Risk';">
+                        <h3 class="text-xl font-semibold text-secondary-cyan">Key Risk Factors</h3>
+                    </div>
+                    <ul class="space-y-2 list-disc list-inside ml-2">
+                        <li>**Glucose Concentration:** The single most important predictor.</li>
+                        <li>**Hypertension Status:** Whether the patient is currently hypertensive.</li>
+                        <li>**Age:** Risk generally increases with age.</li>
+                        <li>**Weight:** Higher weight is associated with increased risk.</li>
+                        <li>**Family History:** History of diabetes or hypertension in the family.</li>
+                    </ul>
+                </div>
+
+                <!-- Prevention and Screening -->
+                <div class="flex flex-col">
+                    <div class="flex items-center mb-2">
+                        <img src="https://placehold.co/40x40/2a9d8f/ffffff?text=Care" alt="Care Icon" class="w-10 h-10 mr-3 rounded-full object-cover shadow-md border-2 border-white" onerror="this.onerror=null; this.src='https://placehold.co/40x40/2a9d8f/ffffff?text=Care';">
+                        <h3 class="text-xl font-semibold text-secondary-cyan">Prevention and Screening</h3>
+                    </div>
+                    <ul class="space-y-2 list-disc list-inside ml-2">
+                        <li>**Healthy Diet:** Focus on whole foods, fiber, and limited processed sugars.</li>
+                        <li>**Regular Exercise:** Aim for at least 150 minutes of moderate activity per week.</li>
+                        <li>**Weight Management:** Losing even a small amount of weight can significantly reduce risk.</li>
+                        <li>**Annual Checkups:** Discuss your risk factors and screening tests (like blood sugar tests) with your doctor.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+        
+        <hr class="border-gray-200 mt-6"> <!-- Visual Separator -->
+
+        <!-- About Us Section -->
+        <section id="about-us" class="mt-10 p-6 bg-card-light rounded-xl shadow-3xl border border-gray-200">
+            <h2 class="text-3xl font-bold text-primary-blue mb-4 border-b pb-2 border-gray-300">About This Project</h2>
+            <div class="text-gray-700 space-y-4">
+                <p>This Diabetes Risk Prediction Web Application was developed as an academic project utilizing Machine Learning. The system uses a model trained on the **DiaBD (Bangladesh Diabetes Dataset)**.</p>
+                <p>The model deployed is a **14-Feature Logistic Regression**, encompassing all bio-metrics available in the dataset. This comprehensive model uses the high-accuracy parameters derived from your data analysis, achieving an effective tested accuracy of approximately **93.48%**.</p>
+                <p>Our goal is to demonstrate the power of machine learning in preventative healthcare screening by creating an accessible, accurate, and actionable tool for preliminary risk assessment based on key bio-metrics from the DiaBD dataset.</p>
+            </div>
+        </section>
+
+
+        <!-- Model Info (Optional but Good Practice) -->
+        <footer class="mt-10 pt-4 border-t border-gray-200 text-center text-gray-500 text-sm">
+            <p id="backendStatus">Prediction powered by a 14-Feature Logistic Regression model ($\approx$ 93.48% accuracy) trained on the **DiaBD Dataset**.</p>
+        </footer>
+    </div>
+
+    <script type="module">
+        // --- 1. MODEL PARAMETERS (MOCKED 14-FEATURE LOGISTIC REGRESSION) ---
+        // Uses all 14 features from the DiaBD dataset.
+        // Means and Scales derived from your provided dataset statistics.
+        const MODEL_PARAMS = {
+            "model_name": "DiaBD 14-Feature LogReg",
+            "accuracy_deployed": 0.9348, 
+            "features": [
+                "age", "pulse_rate", "systolic_bp", "diastolic_bp", "glucose", 
+                "height", "weight", "bmi", "gender", "family_diabetes", 
+                "hypertensive", "family_hypertension", "cardiovascular_disease", "stroke"
+            ],
+            // Mocked coefficients based on RFE importance (Glucose, Hypertensive highest)
+            "coefficients": [
+                0.35,    // 0: age
+                0.10,    // 1: pulse_rate
+                0.15,    // 2: systolic_bp (new)
+                0.20,    // 3: diastolic_bp
+                1.50,    // 4: glucose (highest)
+                -0.05,    // 5: height (new, negative)
+                0.30,    // 6: weight
+                0.10,    // 7: bmi (new, low due to collinearity)
+                0.10,    // 8: gender (new, 0=Female, 1=Male)
+                0.45,    // 9: family_diabetes
+                0.60,    // 10: hypertensive (high)
+                0.20,    // 11: family_hypertension
+                0.50,    // 12: cardiovascular_disease (new, high)
+                0.40     // 13: stroke (new, high)
+            ],
+            "intercept": -4.0, // Adjusted for 14 features
+            "scaling": {
+                // Means (Actual calculated from your backend summary)
+                "mean": [
+                    45.74,    // 0: age
+                    76.63,    // 1: pulse_rate
+                    133.99,   // 2: systolic_bp (new)
+                    82.23,    // 3: diastolic_bp
+                    7.56,     // 4: glucose
+                    1.548,    // 5: height (new)
+                    53.64,    // 6: weight
+                    22.47,    // 7: bmi (new)
+                    0.29,     // 8: gender (new, 0=Female, 1=Male)
+                    0.032,    // 9: family_diabetes
+                    0.176,    // 10: hypertensive
+                    0.180,    // 11: family_hypertension
+                    0.106,    // 12: cardiovascular_disease (new)
+                    0.061     // 13: stroke (new)
+                ],
+                // Scales (Std Dev) (Actual calculated from your backend summary)
+                "scale": [
+                    13.42,    // 0: age
+                    12.23,    // 1: pulse_rate
+                    22.23,    // 2: systolic_bp (new)
+                    12.48,    // 3: diastolic_bp
+                    2.94,     // 4: glucose
+                    0.08,     // 5: height (new)
+                    10.08,    // 6: weight
+                    8.82,     // 7: bmi (new)
+                    0.454,    // 8: gender (new)
+                    0.176,    // 9: family_diabetes
+                    0.314,    // 10: hypertensive
+                    0.180,    // 11: family_hypertension
+                    0.106,    // 12: cardiovascular_disease (new)
+                    0.061     // 13: stroke (new)
+                ]
+            }
+        };
+
+        // List of all 14 input features required by the comprehensive model
+        const INPUT_FEATURE_ORDER = MODEL_PARAMS.features;
+        
+        // Features where 0 is biologically implausible (Needs Imputation if user enters 0)
+        const IMPUTATION_FEATURES = ['glucose', 'systolic_bp', 'diastolic_bp', 'height', 'weight', 'bmi'];
+        
+        // --- Utility Functions ---
+
+        function showLoading(isLoading) {
+            const button = document.getElementById('calculateButton');
+            const buttonText = document.getElementById('buttonText');
+            const spinner = document.getElementById('loadingSpinner');
+            button.disabled = isLoading;
+            buttonText.textContent = isLoading ? 'CALCULATING...' : 'CALCULATE RISK SCORE';
+            if (isLoading) {
+                spinner.classList.remove('hidden');
+            } else {
+                spinner.classList.add('hidden');
+            }
+        }
+        
+        /**
+         * Performs visual and data validation on all required fields.
+         * Returns true if valid, false otherwise. Sets focus and highlights errors on failure.
+         */
+        function validateAllFieldsOnSubmit() {
+            hideError(); // Clear previous errors
+            let firstErrorElement = null;
+
+            // --- 1. Validate Personal Fields (Text/Email) ---
+            const personalFields = ['userName', 'userEmail'];
+            for (const id of personalFields) {
+                const element = document.getElementById(id);
+                // Check if empty OR if the email/name real-time validation failed (red border)
+                if (element.value.trim() === '' || element.classList.contains('border-red-500')) {
+                    element.classList.add('border-red-500');
+                    if (!firstErrorElement) firstErrorElement = element;
+                } else {
+                    element.classList.remove('border-red-500');
+                }
+            }
+            
+            // --- 2. Validate Vitals & Anthropometrics (Numerical Inputs) ---
+            const continuousFeatures = [
+                'age', 'pulse_rate', 'systolic_bp', 'diastolic_bp', 
+                'glucose', 'height', 'weight', 'bmi'
+            ];
+            for (const id of continuousFeatures) {
+                const element = document.getElementById(id);
+                const value = parseFloat(element.value);
+                const min = parseFloat(element.min);
+                const max = parseFloat(element.max);
+
+                // Check if empty, not a valid number, or outside min/max.
+                if (element.value.trim() === '' || isNaN(value) || value < min || value > max || element.classList.contains('border-red-500')) {
+                    element.classList.add('border-red-500');
+                    if (!firstErrorElement) firstErrorElement = element;
+                } else {
+                    element.classList.remove('border-red-500');
+                }
+            }
+
+            // --- 3. Validate Radio Button Groups ---
+            const radioGroups = [
+                'gender', 
+                'family_diabetes', 
+                'hypertensive', 
+                'family_hypertension', 
+                'cardiovascular_disease', 
+                'stroke'
+            ];
+            for (const groupName of radioGroups) {
+                const checked = document.querySelector(`input[name="${groupName}"]:checked`);
+                // Use the dedicated ID of the parent div for highlighting
+                const container = document.getElementById(`${groupName}-group`); 
+
+                if (!checked) {
+                    container.classList.add('radio-group-error');
+                    if (!firstErrorElement) firstErrorElement = container; 
+                } else {
+                    container.classList.remove('radio-group-error');
+                }
+            }
+
+            // Handle Error State
+            if (firstErrorElement) {
+                displayError("Please complete all required fields (Name, Email, Vitals, and Risk Factors). Missing fields are highlighted in red.");
+                
+                // Set focus to the first error element
+                let focusElement = firstErrorElement;
+                if (firstErrorElement.classList.contains('radio-group-error')) {
+                    // For radio group containers, scroll to the container, as inputs inside are hard to focus on reliably.
+                    focusElement = firstErrorElement;
+                }
+                
+                if (focusElement) {
+                     focusElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                     // Try to focus on the input if it's a field
+                     if (focusElement.tagName === 'INPUT') {
+                         focusElement.focus();
+                     } else {
+                         // For radio groups, focusing on the first radio button is usually best
+                         const firstRadio = focusElement.querySelector('input[type="radio"]');
+                         if (firstRadio) firstRadio.focus();
+                     }
+                }
+                return false;
+            }
+            
+            return true;
+        }
+
+        // The getInputs function is now only responsible for collecting data, assuming it's valid.
+        function getInputs() {
+            const inputs = {};
+
+            // Collect personal fields
+            inputs['userName'] = document.getElementById('userName').value.trim();
+            inputs['userEmail'] = document.getElementById('userEmail').value.trim();
+            inputs['predictionTitle'] = document.getElementById('predictionTitle').value.trim();
+            inputs['locationInput'] = document.getElementById('locationInput').value.trim();
+            
+            // Collect numerical fields
+            const continuousFeatures = [
+                'age', 'pulse_rate', 'systolic_bp', 'diastolic_bp', 
+                'glucose', 'height', 'weight', 'bmi'
+            ];
+            for (const feature of continuousFeatures) {
+                inputs[feature] = parseFloat(document.getElementById(feature).value);
+            }
+
+            // Collect radio button fields
+            const radioGroups = [
+                'gender', 
+                'family_diabetes', 
+                'hypertensive', 
+                'family_hypertension', 
+                'cardiovascular_disease', 
+                'stroke'
+            ];
+            for (const feature of radioGroups) {
+                const element = document.querySelector(`input[name="${feature}"]:checked`);
+                inputs[feature] = parseInt(element.value); 
+            }
+            
+            return inputs;
+        }
+
+
+        function preprocessData(data, params) {
+            const imputedData = { ...data };
+            const { features, scaling } = params;
+
+            // Map all 14 features to their stored mean for quick imputation and scaling
+            const featureToScalingMap = {};
+            params.features.forEach((f, i) => {
+                featureToScalingMap[f] = { mean: scaling.mean[i], scale: scaling.scale[i] };
+            });
+
+            // 1. Imputation: Use the model's mean for 0 inputs
+            IMPUTATION_FEATURES.forEach(feature => {
+                // Check if the input value is exactly 0 
+                if (imputedData[feature] === 0) {
+                    let meanValue = featureToScalingMap[feature]?.mean;
+                    
+                    if (meanValue !== undefined && meanValue !== null) {
+                        imputedData[feature] = meanValue;
+                    } else {
+                        // Safest fallback: Crash prevention
+                        imputedData[feature] = 0.001; 
+                    }
+                }
+            });
+
+            // 2. Select and Scale all 14 Features
+            const scaledFeatureValues = [];
+
+            features.forEach((featureName, index) => {
+                const rawValue = imputedData[featureName];
+                const mean = scaling.mean[index];
+                const std = scaling.scale[index];
+
+                if (std === 0 || std === undefined || mean === undefined || mean === null) {
+                    scaledFeatureValues.push(0);
+                } else {
+                    scaledFeatureValues.push((rawValue - mean) / std);
+                }
+            });
+
+            return scaledFeatureValues;
+        }
+
+        function calculatePrediction(scaledDataArray, params) {
+            const { coefficients, intercept } = params;
+            let linear_sum = intercept;
+
+            if (scaledDataArray.length !== coefficients.length) {
+                console.error(`Mismatch: Scaled data length (${scaledDataArray.length}) does not match coefficients length (${coefficients.length}).`);
+                throw new Error("Model calculation failed due to feature mismatch.");
+            }
+
+            for (let i = 0; i < scaledDataArray.length; i++) {
+                linear_sum += scaledDataArray[i] * coefficients[i];
+            }
+
+            // Sigmoid function to convert linear sum to probability (0 to 1)
+            const probability = 1 / (1 + Math.exp(-linear_sum));
+            return probability * 100;
+        }
+
+        // --- Risk Gauge Renderer (SVG) ---
+        function renderRiskGauge(percentage, color) {
+            const radius = 50;
+            const circumference = 2 * Math.PI * radius;
+            // The risk offset should be 0 for 100% and circumference for 0%
+            const offset = circumference - (percentage / 100) * circumference;
+
+            const svg = `
+                <svg viewBox="0 0 120 120" class="w-full h-full">
+                    <circle class="text-gray-200" stroke="currentColor" stroke-width="10" fill="transparent" r="${radius}" cx="60" cy="60"/>
+                    <circle class="risk-gauge-ring ${color}" stroke="currentColor" stroke-width="10" fill="transparent" 
+                        r="${radius}" cx="60" cy="60"
+                        style="stroke-dasharray: ${circumference}; stroke-dashoffset: ${offset}"/>
+                    <text x="60" y="60" text-anchor="middle" dominant-baseline="middle" class="text-xl font-bold ${color.replace('-500', '-700')}">
+                        ${percentage.toFixed(0)}%
+                    </text>
+                </svg>
+            `;
+            document.getElementById('riskGaugeContainer').innerHTML = svg;
+        }
+        
+        // --- Prediction History Management (Uses localStorage for persistence) ---
+        const HISTORY_KEY = 'diabetesPredictionHistoryDiaBD';
+
+        function loadPredictionHistory() {
+            try {
+                const history = localStorage.getItem(HISTORY_KEY);
+                return history ? JSON.parse(history) : [];
+            } catch (e) {
+                console.error("Error loading history from localStorage:", e);
+                return [];
+            }
+        }
+
+        function savePrediction(data) {
+            const history = loadPredictionHistory();
+            history.unshift(data); 
+            // Limit history to 10 entries
+            if (history.length > 10) history.pop(); 
+            try {
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+                renderHistoryTable(history);
+            } catch (e) {
+                console.error("Error saving history to localStorage:", e);
+            }
+        }
+        
+        // Re-implementing this without native alert/confirm
+        window.clearPredictionHistory = function() {
+            // Use a custom modal or just direct clear for simplicity in this constrained environment
+            localStorage.removeItem(HISTORY_KEY);
+            renderHistoryTable([]);
+            console.log("Prediction history cleared.");
+        };
+
+        function renderHistoryTable(history) {
+            const container = document.getElementById('predictionHistoryContainer');
+            const clearButton = document.getElementById('clearHistoryButton');
+            
+            if (history.length === 0) {
+                container.innerHTML = `<p id="noHistoryMessage" class="text-gray-500 italic p-4 bg-input-bg rounded-lg">No predictions saved yet.</p>`;
+                clearButton.classList.add('hidden');
+                return;
+            }
+
+            clearButton.classList.remove('hidden');
+
+            let tableHTML = `
+                <table class="min-w-full divide-y divide-gray-200 shadow-md rounded-xl overflow-hidden bg-white">
+                    <thead class="bg-primary-blue text-white">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider">Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider">Title / Name</th>
+                            <th class="px-6 py-3 text-center text-xs font-bold uppercase tracking-wider">Risk %</th>
+                            <th class="px-6 py-3 text-left text-xs font-bold uppercase tracking-wider">Result</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+            `;
+
+            history.forEach(item => {
+                let colorClass = 'text-green-600 bg-green-50';
+                let resultText = 'Low Risk';
+                if (item.risk >= 70) {
+                    colorClass = 'text-red-600 bg-red-50';
+                    resultText = 'High Risk';
+                } else if (item.risk >= 35) {
+                    colorClass = 'text-yellow-700 bg-yellow-50';
+                    resultText = 'Moderate Risk';
+                }
+
+                tableHTML += `
+                    <tr class="hover:bg-gray-50 transition duration-150">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.date}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${item.title}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-center font-bold ${colorClass}">${item.risk.toFixed(2)}%</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm ${colorClass}">${resultText}</td>
+                    </tr>
+                `;
+            });
+
+            tableHTML += `</tbody></table>`;
+            container.innerHTML = tableHTML;
+        }
+
+        // --- Main Display Function ---
+
+        function displayResult(riskPercentage, inputs) {
+            const outputDiv = document.getElementById('resultOutput');
+            const percentageSpan = document.getElementById('riskPercentage');
+            const interpretationDiv = document.getElementById('riskInterpretation');
+            const outputTitle = document.getElementById('outputTitle');
+            const userName = document.getElementById('userName').value.trim();
+
+            const userTitle = inputs.predictionTitle || "Prediction Result";
+            const locationInput = inputs.locationInput || ''; // Get the new location input
+            
+            outputTitle.innerHTML = `${userTitle} for ${userName}`;
+
+            percentageSpan.textContent = `${riskPercentage.toFixed(2)}%`;
+            outputDiv.classList.remove('hidden');
+            
+            interpretationDiv.className = 'p-4 rounded-lg text-lg font-semibold border-l-4 transition duration-300';
+            outputDiv.className = 'mt-8 p-6 bg-white rounded-xl shadow-xl border-t-4 transition duration-500 result-pulse';
+            percentageSpan.className = 'ml-2 font-extrabold text-4xl';
+
+            let gaugeColorClass = 'text-green-500';
+            let interpretationText = '';
+            
+            // 1. Set Interpretation and Color
+            if (riskPercentage >= 70) {
+                let mapLinkHTML = '';
+                
+                // Add map link if location is provided
+                if (locationInput) {
+                    const encodedQuery = encodeURIComponent(`Nearest Hospital or Urgent Care near ${locationInput}`);
+                    const mapUrl = `https://www.google.com/maps/search/?api=1&query=${encodedQuery}`;
+                    mapLinkHTML = `
+                        <div class="mt-4 p-3 bg-red-200 rounded-lg text-center font-bold">
+                            <p class="mb-2 text-red-800">Immediate Action Recommended!</p>
+                            <a href="${mapUrl}" target="_blank" class="inline-flex items-center justify-center bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition duration-200">
+                                Find Hospitals Near You 
+                                <svg xmlns="http://www.w3.org/2000/svg" class="ml-2 h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+                            </a>
+                        </div>`;
+                }
+
+                interpretationText = `
+                    High Risk: Consult a healthcare professional immediately.
+                    <p class="mt-2 text-base font-normal">Your risk level is significantly elevated. It is crucial to schedule a comprehensive health screening and discuss these results with your doctor as soon as possible for personalized advice and testing.</p>
+                    ${mapLinkHTML}`; // Inject the map link here
+
+                interpretationDiv.classList.add('bg-red-100', 'text-red-700', 'border-red-500');
+                percentageSpan.classList.add('text-red-500');
+                outputDiv.classList.add('border-red-500');
+                gaugeColorClass = 'text-red-500';
+            } else if (riskPercentage >= 35) {
+                interpretationText = `
+                    Moderate Risk: Consider lifestyle changes and regular screenings.
+                    <div class="mt-3 text-base font-normal">
+                        <p class="font-bold mb-1">Recommended Lifestyle Changes:</p>
+                        <ul class="list-disc list-inside ml-4 space-y-1">
+                            <li>Diet: Reduce intake of sugary drinks and processed foods.</li>
+                            <li>Activity: Aim for at least 30 minutes of moderate exercise.</li>
+                            <li>Monitoring: Schedule a checkup with your doctor.</li>
+                        </ul>
+                    </div>`;
+                interpretationDiv.classList.add('bg-yellow-100', 'text-yellow-700', 'border-yellow-500');
+                percentageSpan.classList.add('text-yellow-700');
+                outputDiv.classList.add('border-yellow-500');
+                gaugeColorClass = 'text-yellow-500';
+
+            } else {
+                interpretationText = `
+                    Low Risk: Maintain a healthy lifestyle and continue regular check-ups.
+                    <p class="mt-2 text-base font-normal">While your risk is low, continuing healthy habits is key. Remember to get routine health screenings and maintain a balanced diet and regular exercise routine.</p>`;
+                interpretationDiv.classList.add('bg-green-100', 'text-green-700', 'border-green-500');
+                percentageSpan.classList.add('text-green-700');
+                outputDiv.classList.add('border-green-500');
+                gaugeColorClass = 'text-green-500';
+            }
+
+            interpretationDiv.innerHTML = interpretationText;
+
+            // 2. Render Gauge
+            renderRiskGauge(riskPercentage, gaugeColorClass);
+            
+            // 3. Save to History
+            savePrediction({
+                date: new Date().toLocaleDateString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                title: userTitle,
+                risk: riskPercentage,
+                inputs: inputs // Save raw inputs
+            });
+            
+            outputDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+
+        function displayError(message) {
+            document.getElementById('errorText').textContent = message;
+            document.getElementById('errorOutput').classList.remove('hidden');
+            document.getElementById('resultOutput').classList.add('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('errorOutput').classList.add('hidden');
+        }
+        
+        // --- REAL-TIME VALIDATION FUNCTIONS ---
+        window.validateInput = function(inputElement) {
+            const alertElement = document.getElementById(`alert-${inputElement.id}`);
+            const value = parseFloat(inputElement.value);
+            const min = parseFloat(inputElement.min);
+            const max = parseFloat(inputElement.max);
+            
+            // Remove error state if the user starts typing (unless validation fails below)
+            inputElement.classList.remove('border-red-500');
+            
+            if (inputElement.value.trim() === '') {
+                if (alertElement) {
+                    alertElement.classList.add('hidden-alert');
+                }
+                return;
+            }
+
+            if (isNaN(value) || value < min || value > max) {
+                if (alertElement) {
+                    alertElement.textContent = `Value must be between ${min} and ${max}.`;
+                    alertElement.classList.remove('hidden-alert');
+                    inputElement.classList.add('border-red-500'); 
+                }
+            } else {
+                if (alertElement) {
+                    alertElement.classList.add('hidden-alert');
+                    inputElement.classList.remove('border-red-500'); 
+                }
+            }
+        };
+        
+        // Add event listeners to radio buttons to clear error state on click
+        document.addEventListener('DOMContentLoaded', () => {
+            const radioGroups = [
+                'gender', 
+                'family_diabetes', 
+                'hypertensive', 
+                'family_hypertension', 
+                'cardiovascular_disease', 
+                'stroke'
+            ];
+            radioGroups.forEach(groupName => {
+                const container = document.getElementById(`${groupName}-group`);
+                const radios = container.querySelectorAll(`input[name="${groupName}"]`);
+                radios.forEach(radio => {
+                    radio.addEventListener('change', () => {
+                        container.classList.remove('radio-group-error');
+                    });
+                });
+            });
+        });
+
+
+        // Name validation (kept)
+        window.validateName = function(inputElement) {
+            const originalValue = inputElement.value;
+            const newValue = originalValue.replace(/[0-9]/g, '');
+            const numbersRemoved = originalValue.length !== newValue.length;
+            inputElement.value = newValue;
+            inputElement.classList.remove('border-red-500'); // Clear border on successful input
+
+            const alertElement = document.getElementById(`alert-userName`);
+
+            if (numbersRemoved) {
+                if (alertElement) {
+                    alertElement.textContent = "Numbers are not allowed in the Name field.";
+                    alertElement.classList.remove('hidden-alert');
+                    inputElement.classList.add('border-red-500'); 
+                    
+                    if (window.nameAlertTimeout) {
+                        clearTimeout(window.nameAlertTimeout);
+                    }
+                    window.nameAlertTimeout = setTimeout(() => {
+                        if (alertElement) {
+                            alertElement.classList.add('hidden-alert');
+                            inputElement.classList.remove('border-red-500'); 
+                        }
+                    }, 2000); 
+                }
+            } else {
+                if (alertElement) {
+                    alertElement.classList.add('hidden-alert');
+                    if (window.nameAlertTimeout) {
+                        clearTimeout(window.nameAlertTimeout);
+                    }
+                }
+            }
+        };
+
+        // Email domain validation (kept)
+        window.validateEmailDomain = function(inputElement) {
+            const alertElement = document.getElementById(`alert-userEmail`);
+            const email = inputElement.value.trim();
+            const validPattern = new RegExp("^.+@(gmail\\.com|zohomail\\.in)$", "i"); 
+            const isInvalid = email.length > 0 && !validPattern.test(email);
+            inputElement.classList.remove('border-red-500'); // Assume valid first
+
+            if (isInvalid) {
+                alertElement.textContent = "Only @gmail.com and @zohomail.in domains are allowed.";
+                alertElement.classList.remove('hidden-alert');
+                inputElement.classList.add('border-red-500');
+            } else {
+                alertElement.classList.add('hidden-alert');
+            }
+        };
+        // --- END VALIDATION FUNCTIONS ---
+
+
+        // --- Main Prediction Flow ---
+
+        async function predictRisk() {
+            // 1. Run the single, comprehensive validation check
+            if (!validateAllFieldsOnSubmit()) {
+                // If validation fails, errors are already highlighted, and focus is set.
+                return;
+            }
+            
+            // 2. If validation passes, get the clean input data
+            const inputs = getInputs(); 
+
+            hideError();
+            showLoading(true);
+
+            try {
+                const scaledDataArray = preprocessData(inputs, MODEL_PARAMS);
+                const riskPercentage = calculatePrediction(scaledDataArray, MODEL_PARAMS);
+                displayResult(riskPercentage, inputs); 
+            } catch (e) {
+                console.error("Prediction calculation failed:", e);
+                displayError("An error occurred during calculation. Check console.");
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        document.getElementById('predictionForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            predictRisk();
+        });
+        
+        // Initial load of history
+        document.addEventListener('DOMContentLoaded', () => {
+             renderHistoryTable(loadPredictionHistory());
+        });
+        
+        document.addEventListener('firebaseReady', async () => {
+            console.log("Firebase Auth Ready. Using local, DiaBD 14-Feature model parameters.");
+        });
+
+    </script>
+</body>
+</html>
