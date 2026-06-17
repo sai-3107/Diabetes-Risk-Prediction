@@ -2,7 +2,7 @@
 
 ### Validation on the DiaBD-A Regional Dataset (Bangladesh)
 
-This repository contains the implementation, data analysis, and predictive model developed for the research chapter **"Deep Learning for Highly Accurate Type 2 Diabetes Risk Assessment: Validation on the DiaBD-A Regional Dataset"**, accepted for publication in an **Elsevier edited volume** on Artificial Intelligence and Computational Models in Metabolic Health.
+This repository contains the implementation, data analysis, and predictive model developed as part of the research chapter "Deep Learning for Highly Accurate Type 2 Diabetes Risk Assessment: Validation on the DiaBD-A Regional Dataset," accepted for publication in an Elsevier edited volume on Artificial Intelligence and Computational Models in Metabolic Health.
 
 The project presents a deep learning-based approach for early Type 2 Diabetes Mellitus (T2DM) risk assessment using the DiaBD-A regional clinical dataset. By leveraging a Sequential Neural Network and comprehensive data preprocessing techniques, the model aims to support early diagnosis and improve healthcare decision-making.
 
